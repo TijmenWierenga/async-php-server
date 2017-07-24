@@ -22,15 +22,21 @@ class AsyncServer implements Server
      * @var RequestHandler
      */
     private $requestHandler;
+    /**
+     * @var RequestBuilder
+     */
+    private $requestBuilder;
 
     /**
      * AsyncServer constructor.
      * @param Connection $connection
+     * @param RequestBuilder $requestBuilder
      * @param RequestHandler $requestHandler
      */
-    public function __construct(Connection $connection, RequestHandler $requestHandler)
+    public function __construct(Connection $connection, RequestBuilder $requestBuilder, RequestHandler $requestHandler)
     {
         $this->connection = $connection;
+        $this->requestBuilder = $requestBuilder;
         $this->requestHandler = $requestHandler;
     }
 
@@ -41,7 +47,7 @@ class AsyncServer implements Server
         $server = new HttpServer(function (ServerRequestInterface $request) {
             return new Promise(function ($resolve, $reject) use ($request) {
                 $request->getBody()->on('data', function ($data) use (&$request) {
-                    // TODO: Create new Request object based on data and content-type
+                    $request = $this->requestBuilder->withData($request, $data);
                 });
 
                 $request->getBody()->on('end', function () use ($resolve, $request){

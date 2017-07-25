@@ -46,12 +46,12 @@ class AsyncServer implements Server
         $loop = Factory::create();
 
         $server = new HttpServer(function (ServerRequestInterface $request) {
-            return new Promise(function ($resolve, $reject) use ($request) {
+            return new Promise(function ($resolve) use ($request) {
                 $request->getBody()->on('data', function ($data) use (&$request) {
                     $request = $this->parseRequestBody($request, $data);
                 });
 
-                $request->getBody()->on('end', function () use ($resolve, $request){
+                $request->getBody()->on('end', function () use ($resolve, &$request) {
                     $response = $this->requestHandler->handle($request);
                     $resolve($response);
                 });
@@ -63,7 +63,7 @@ class AsyncServer implements Server
             });
         });
 
-        $socket = new SocketServer((string) $$this->connection, $loop);
+        $socket = new SocketServer((string) $this->connection, $loop);
         $server->listen($socket);
 
         $loop->run();

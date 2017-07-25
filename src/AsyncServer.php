@@ -2,6 +2,7 @@
 namespace TijmenWierenga\Server;
 
 use Exception;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use React\EventLoop\Factory;
 use React\Http\Response;
@@ -23,21 +24,21 @@ class AsyncServer implements Server
      */
     private $requestHandler;
     /**
-     * @var RequestBuilder
+     * @var Parser
      */
-    private $requestBuilder;
+    private $parser;
 
     /**
      * AsyncServer constructor.
      * @param Connection $connection
-     * @param RequestBuilder $requestBuilder
      * @param RequestHandler $requestHandler
+     * @param Parser $parser
      */
-    public function __construct(Connection $connection, RequestBuilder $requestBuilder, RequestHandler $requestHandler)
+    public function __construct(Connection $connection, RequestHandler $requestHandler, Parser $parser)
     {
         $this->connection = $connection;
-        $this->requestBuilder = $requestBuilder;
         $this->requestHandler = $requestHandler;
+        $this->parser = $parser;
     }
 
     public function run(): void
@@ -47,7 +48,7 @@ class AsyncServer implements Server
         $server = new HttpServer(function (ServerRequestInterface $request) {
             return new Promise(function ($resolve, $reject) use ($request) {
                 $request->getBody()->on('data', function ($data) use (&$request) {
-                    $request = $this->requestBuilder->withData($request, $data);
+                    $request = $this->parseRequestBody($request, $data);
                 });
 
                 $request->getBody()->on('end', function () use ($resolve, $request){
@@ -55,10 +56,8 @@ class AsyncServer implements Server
                     $resolve($response);
                 });
 
-                // an error occures e.g. on invalid chunked encoded data or an unexpected 'end' event
-                $request->getBody()->on('error', function (Exception $exception) use ($resolve) {
-                    // TODO: Return response based on Accept header and Exception data.
-                    $response = new Response();
+                $request->getBody()->on('error', function (Exception $exception) use ($resolve, $request) {
+                    $response = $this->parseException($exception, $request);
                     $resolve($response);
                 });
             });
@@ -68,5 +67,40 @@ class AsyncServer implements Server
         $server->listen($socket);
 
         $loop->run();
+    }
+
+    /**
+     * @param ServerRequestInterface $request
+     * @param mixed $data
+     * @return ServerRequestInterface
+     */
+    private function parseRequestBody(ServerRequestInterface $request, $data): ServerRequestInterface
+    {
+        if ($request->hasHeader('Content-Type')) {
+            $format = $request->getHeader('Content-Type')[0];
+        } else {
+            $format = 'application/json';
+        }
+
+        $parsedBody = $this->parser->parse($data, $format);
+
+        return $request->withParsedBody($parsedBody);
+    }
+
+    private function parseException(Exception $exception, ServerRequestInterface $request): ResponseInterface
+    {
+        if ($request->hasHeader('Accept')) {
+            $format = $request->getHeader('Accept')[0];
+        } else {
+            $format = 'application/json';
+        }
+
+        $parsedBody = $this->parser->parse([
+            "errors" => [$exception->getMessage()]
+        ], $format);
+
+        return new Response(400, [
+            'Content-Type' => $format
+        ], $parsedBody);
     }
 }
